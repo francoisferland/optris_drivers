@@ -72,7 +72,7 @@ void onThermalDataReceive(const sensor_msgs::ImageConstPtr& image)
   img.step            = image->width*3;
   img.data.resize(img.height*img.step);
   img.header.seq      = ++_frame;
-  img.header.stamp    = ros::Time::now();
+  img.header.stamp    = image->header.stamp;
 
   for(unsigned int i=0; i<image->width*image->height*3; i++) {
     img.data[i] = _bufferThermal[i];
