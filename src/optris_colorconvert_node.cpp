@@ -1,7 +1,7 @@
 /*********************************************************************
  * Software License Agreement (BSD License)
  *
- *  Copyright (c) 2012-2015
+ *  Copyright (c) 2012-2016
  *  Technische Hochschule Nürnberg Georg Simon Ohm
  *  All rights reserved.
  *
@@ -44,18 +44,20 @@
 #include <camera_info_manager/camera_info_manager.h>
 #include <sensor_msgs/CameraInfo.h>
 
+#include <optris_drivers/Palette.h>
+
 unsigned char*                    _bufferThermal = NULL;
 unsigned char*                    _bufferVisible = NULL;
 image_transport::Publisher*       _pubThermal;
 image_transport::Publisher*       _pubVisible;
 unsigned int                      _frame = 0;
 
-optris::ImageBuilder              _iBuilder;
-optris::EnumOptrisColoringPalette _palette;
+evo::ImageBuilder              _iBuilder;
 
-sensor_msgs::CameraInfo _camera_info;
-image_transport::CameraPublisher* _camera_info_pub = NULL;
+sensor_msgs::CameraInfo                 _camera_info;
+image_transport::CameraPublisher*       _camera_info_pub     = NULL;
 camera_info_manager::CameraInfoManager* _camera_info_manager = NULL;
+ros::ServiceServer _sPalette;
 
 void onThermalDataReceive(const sensor_msgs::ImageConstPtr& image)
 {
@@ -121,6 +123,31 @@ void onVisibleDataReceive(const sensor_msgs::ImageConstPtr& image)
   _pubVisible->publish(img);
 }
 
+bool onPalette(optris_drivers::Palette::Request &req, optris_drivers::Palette::Response &res)
+{
+  res.success = false;
+
+  if(req.palette > 0 && req.palette < 12)
+  {
+    _iBuilder.setPalette((evo::EnumOptrisColoringPalette)req.palette);
+    res.success = true;
+  }
+
+  if(req.paletteScaling >=1 && req.paletteScaling <= 4)
+  {
+    _iBuilder.setPaletteScalingMethod((evo::EnumOptrisPaletteScalingMethod) req.paletteScaling);
+    res.success = true;
+  }
+
+  if(_iBuilder.getPaletteScalingMethod() == evo::eManual &&  req.temperatureMin < req.temperatureMax)
+  {
+    _iBuilder.setManualTemperatureRange(req.temperatureMin, req.temperatureMax);
+    res.success = true;
+  }
+
+  return true;
+}
+
 int main (int argc, char* argv[])
 {
   ros::init (argc, argv, "optris_colorconvert_node");
@@ -130,15 +157,14 @@ int main (int argc, char* argv[])
 
   int palette = 6;
   n_.getParam("palette", palette);
-  _palette = (optris::EnumOptrisColoringPalette) palette;
 
-  optris::EnumOptrisPaletteScalingMethod scalingMethod = optris::eMinMax;
+  evo::EnumOptrisPaletteScalingMethod scalingMethod = evo::eMinMax;
   int sm;
   n_.getParam("paletteScaling", sm);
-  if(sm>=1 && sm <=4) scalingMethod = (optris::EnumOptrisPaletteScalingMethod) sm;
+  if(sm>=1 && sm <=4) scalingMethod = (evo::EnumOptrisPaletteScalingMethod) sm;
 
   _iBuilder.setPaletteScalingMethod(scalingMethod);
-  _iBuilder.setPalette(_palette);
+  _iBuilder.setPalette((evo::EnumOptrisColoringPalette)palette);
 
   double tMin     = 20.;
   double tMax     = 40.;
@@ -161,6 +187,8 @@ int main (int argc, char* argv[])
   _pubThermal = &pubt;
   _pubVisible = &pubv;
 
+  _sPalette = n.advertiseService("palette",  &onPalette);
+
   std::string camera_name;
   std::string camera_info_url;
   n_.getParam("camera_name", camera_name);
@@ -175,9 +203,7 @@ int main (int argc, char* argv[])
   {
     // GUID is 16 hex digits, which should be valid.
     // If not, use it for log messages anyway.
-    ROS_WARN_STREAM("[" << camera_name
-                    << "] name not valid"
-                    << " for camera_info_manger");
+    ROS_WARN_STREAM("[" << camera_name << "] name not valid" << " for camera_info_manger");
   }
 
   if (_camera_info_manager->validateURL(camera_info_url))
@@ -211,14 +237,8 @@ int main (int argc, char* argv[])
      ros::param::set(key, 9);
   }
 
-  // specify loop rate: a meaningful value according to your publisher configuration
-  ros::Rate loop_rate(looprate);
-  while (ros::ok())
-  {
-    ros::spinOnce();
-    loop_rate.sleep();
-  }
+  ros::spin();
 
-  if(_bufferThermal)	 delete [] _bufferThermal;
+  if(_bufferThermal)	delete [] _bufferThermal;
   if(_bufferVisible)  delete [] _bufferVisible;
 }
